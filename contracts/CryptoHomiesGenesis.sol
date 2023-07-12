@@ -5,9 +5,10 @@ import "./CommonERC721.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/draft-EIP712.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/finance/PaymentSplitter.sol";
 import "./CryptoHomiesCommon.sol";
 
-contract CryptoHomiesGenesis is Ownable, CommonERC721, EIP712 {
+contract CryptoHomiesGenesis is PaymentSplitter, Ownable, CommonERC721, EIP712 {
     string private constant SIGNING_DOMAIN = "CryptoHomiesGenesis";
     string private constant SIGNATURE_VERSION = "1";
 
@@ -25,24 +26,26 @@ contract CryptoHomiesGenesis is Ownable, CommonERC721, EIP712 {
 
     CryptoHomiesCommon public commonContract;
 
-    mapping(address => uint256) private withdrawalPercentages;
-    address[] private withdrawalAddresses;
-
     constructor(
         string memory _contractURI,
-        string memory _commonContractURI,
-        address _validSigner
+        address _validSigner,
+        address[] memory _payees,
+        uint256[] memory _shares
     )
         CommonERC721(
             "CryptoHomiesGenesis",
             "CHG",
-            4848,
+            1998,
             0.1 ether,
             _contractURI
         )
         EIP712(SIGNING_DOMAIN, SIGNATURE_VERSION)
+        PaymentSplitter(_payees, _shares)
     {
-        commonContract = new CryptoHomiesCommon(msg.sender, _commonContractURI);
+        commonContract = new CryptoHomiesCommon(
+            msg.sender,
+            "ipfs://QmScp6Bk1VwksWni4nhWESTP8HMoMVMbPDMj4eHGjAbLCv/chc.json"
+        );
         validSigner = _validSigner;
     }
 
@@ -63,30 +66,81 @@ contract CryptoHomiesGenesis is Ownable, CommonERC721, EIP712 {
             !redeemedVouchers[_voucher.id],
             "This Voucher was already redeemed"
         );
-        _mint();
+        _mint(_redeemer);
         redeemedVouchers[_voucher.id] = true;
     }
 
-    function mint() public payable {
-        require(!allowlistOnly, "Can only mint through allow list");
-        _mint();
+    function mintTokensForOwner(
+        uint16 _genesisTokens,
+        uint16 _commonTokens
+    ) public onlyOwner {
+        // Mint Genesis tokens for free without platform fee
+        for (uint16 i = 0; i < _genesisTokens; i++) {
+            _mintWithoutFee(owner());
+        }
+
+        // Mint common tokens without checking mint limit
+        CryptoHomiesCommon commonContractInstance = CryptoHomiesCommon(
+            address(commonContract)
+        );
+        for (uint16 i = 0; i < _commonTokens; i++) {
+            commonContractInstance.mintWithGenesis(owner());
+        }
     }
 
-    function _mint() internal {
+    function _mintWithoutFee(address _recipient) internal {
+        uint16 _tokenId = tokenIdCount + 1;
+        require(saleActive, "Sale not active");
+        require(_tokenId <= MAX_SUPPLY, "No more items left");
+
+        _safeMint(_recipient, _tokenId);
+        commonContract.mintWithGenesis(_recipient);
+
+        tokenIdCount = _tokenId;
+    }
+
+    function mint(address _buyer) public payable {
+        require(!allowlistOnly, "Can only mint through allow list");
+        _mint(_buyer);
+    }
+
+    // total eth to mint 0.101
+    function _mint(address _buyer) internal {
         uint16 _tokenId = tokenIdCount + 1;
         require(saleActive, "Sale not active");
         require(_tokenId <= MAX_SUPPLY, "No more items left");
         require(msg.value >= mintRate, "Not enough ether sent");
         require(
-            !mintedUsers[currentStage][msg.sender],
-            "User has minted already"
+            !mintedUsers[currentStage][_buyer],
+            "User has already minted"
         );
 
-        _safeMint(msg.sender, _tokenId);
-        commonContract.mintWithGenesis(msg.sender);
+        // Calculate the platform fee
+        uint256 platformFee = (mintRate * 1) / 100; // 1% of the mint rate
+
+        // Calculate the total amount to be paid by the user
+        uint256 totalAmount = mintRate + platformFee;
+
+        require(msg.value >= totalAmount, "Insufficient payment");
+
+        // Transfer the platform fee to the specified address
+        Address.sendValue(
+            payable(0xA2b8E073eA72E4b1b29C0A4E383138ABde571870),
+            platformFee
+        );
+
+        uint256 refundAmount = msg.value - totalAmount;
+
+        _safeMint(_buyer, _tokenId);
+        commonContract.mintWithGenesis(_buyer);
 
         tokenIdCount = _tokenId;
-        mintedUsers[currentStage][msg.sender] = true;
+        mintedUsers[currentStage][_buyer] = true;
+
+        // Refund any excess amount sent by the user
+        if (refundAmount > 0) {
+            Address.sendValue(payable(_buyer), refundAmount);
+        }
     }
 
     function setAllowlistOnly(bool _allowlistOnly) public onlyOwner {
@@ -96,8 +150,6 @@ contract CryptoHomiesGenesis is Ownable, CommonERC721, EIP712 {
     function setValidSigner(address _validSigner) public onlyOwner {
         validSigner = _validSigner;
     }
-
-    // Whitelist help functions
 
     function _hash(Voucher calldata pass) internal view returns (bytes32) {
         return
@@ -117,8 +169,10 @@ contract CryptoHomiesGenesis is Ownable, CommonERC721, EIP712 {
         return ECDSA.recover(digest, pass.signature);
     }
 
-    function withdraw() public onlyOwner {
-        uint256 balance = address(this).balance;
-        payable(owner()).transfer(balance);
+    /**
+     * @dev Release the contract's balance to the payees.
+     */
+    function release() public onlyOwner {
+        super.release(payable(address(this)));
     }
 }

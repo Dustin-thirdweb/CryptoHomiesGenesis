@@ -16,7 +16,7 @@ contract CryptoHomiesCommon is CommonERC721 {
         CommonERC721(
             "CryptoHomiesCommon",
             "CHC",
-            20544,
+            5994,
             0.1 ether,
             _contractURI
         )
@@ -33,21 +33,17 @@ contract CryptoHomiesCommon is CommonERC721 {
         return true;
     }
 
-    function mint(uint16 _amount) public payable {
+    function mintTokensForOwner(uint16 _amount) public onlyOwner {
         require(saleActive, "Sale not active");
         require(_amount <= mintLimitPerTransaction, "Minting limit exceeded");
-        require(msg.value >= (mintRate * _amount), "Not enough ether sent");
-        require(
-            !mintedUsers[currentStage][msg.sender],
-            "User has minted already"
-        );
-        require(tokenIdCount + _amount < MAX_SUPPLY, "No more items left");
+        require(!mintedUsers[currentStage][owner()], "Owner has minted already");
+        require(tokenIdCount + _amount <= MAX_SUPPLY, "No more items left");
 
         for (uint16 i = 0; i < _amount; i++) {
-            _mint(msg.sender);
+            _mint(owner());
         }
 
-        mintedUsers[currentStage][msg.sender] = true;
+        mintedUsers[currentStage][owner()] = true;
     }
 
     function _mint(address _to) internal {
@@ -56,13 +52,11 @@ contract CryptoHomiesCommon is CommonERC721 {
     }
 
     modifier onlyGenesis() {
-        require(msg.sender == genesisContract, "Caller is not genesis");
+        require(msg.sender == genesisContract || msg.sender == owner(), "Caller is not authorized");
         _;
     }
 
-    function changeMintLimitPerTransaction(
-        uint16 _mintLimitPerTransaction
-    ) public onlyOwner {
+    function changeMintLimitPerTransaction(uint16 _mintLimitPerTransaction) public onlyOwner {
         mintLimitPerTransaction = _mintLimitPerTransaction;
     }
 

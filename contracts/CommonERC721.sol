@@ -10,13 +10,13 @@ contract CommonERC721 is ERC721, Ownable, IERC2981 {
     uint16 internal tokenIdCount;
 
     uint16 internal currentStage = 0;
-    bool public saleActive = false;
+    bool public saleActive = true;
 
     uint256 public mintRate;
     uint16 public MAX_SUPPLY;
 
     string public baseURI =
-        "ipfs://QmWiQE65tmpYzcokCheQmng2DCM33DEhjXcPB6PanwpAZo/";
+        "ipfs://QmaG2ifKFartY5vkdmVcsYh93teFj5pgcbrfPvJ9413f7b/chg.gif";
 
     mapping(uint16 => mapping(address => bool)) mintedUsers;
 
